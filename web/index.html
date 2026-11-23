@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111518">
+  <meta name="description" content="Inspect the FairSlot distributed job queue and compare tenant queue wait against FIFO.">
+  <title>FairSlot · Operator console</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="frame header-inner">
+      <a class="brand" href="#overview" aria-label="FairSlot overview"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>FairSlot</a>
+      <nav aria-label="Console">
+        <a href="#overview" id="nav-overview" aria-current="page">Overview</a>
+        <a href="#lab" id="nav-lab">Fairness Lab</a>
+      </nav>
+      <span class="connection" id="connection" data-state="pending"><i></i><span>Connecting</span></span>
+    </div>
+  </header>
+
+  <main class="frame">
+    <section id="overview" aria-labelledby="overview-heading">
+      <div class="page-head">
+        <div>
+          <p class="eyebrow">Operator console</p>
+          <h1 id="overview-heading">Queue overview<span>.</span></h1>
+          <p class="lede">Monitor tenant backlogs, worker activity, and job outcomes.</p>
+        </div>
+        <button class="button primary" id="seed" type="button"><span aria-hidden="true">▶</span> Run live workload</button>
+      </div>
+      <div class="summary" aria-label="Queue totals">
+        <article class="stat"><div class="stat-label"><i class="mark queued"></i> Queued</div><strong id="count-queued">—</strong><p id="queue-subtitle">Ready and scheduled jobs</p></article>
+        <article class="stat"><div class="stat-label"><i class="mark running"></i> Running</div><strong id="count-running">—</strong><p>Jobs with active leases</p></article>
+        <article class="stat"><div class="stat-label"><i class="mark succeeded"></i> Succeeded</div><strong id="count-succeeded">—</strong><p>Completed jobs</p></article>
+        <article class="stat"><div class="stat-label"><i class="mark dead"></i> Dead letter</div><strong id="count-dead_letter">—</strong><p>Jobs that need review</p></article>
+      </div>
+
+      <div class="overview-grid">
+        <section class="panel">
+          <div class="panel-head"><div><h2>Tenant queues</h2><p>Backlog, active leases, and dispatch weight by tenant.</p></div></div>
+          <div class="table-wrap">
+            <table class="tenants">
+              <thead><tr><th scope="col">Tenant</th><th scope="col">Backlog</th><th scope="col">Active / cap</th><th scope="col">Weight</th><th scope="col">Oldest ready</th></tr></thead>
+              <tbody id="tenant-rows"><tr><td class="empty" colspan="5">Loading tenant queues…</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel worker-panel">
+          <div class="panel-head"><div><h2>Worker pool</h2><p>Workers that have checked in recently.</p></div><span class="count-pill" id="worker-count">—</span></div>
+          <ul id="workers" class="worker-list"><li class="empty">Waiting for worker activity…</li></ul>
+          <div class="worker-footer"><span>Lease duration</span><strong id="lease-duration">—</strong></div>
+        </section>
+      </div>
+
+      <section class="panel recent">
+        <div class="panel-head">
+          <div><h2>Recent jobs</h2><p>Open a job to see its dispatch decision and attempt history.</p></div>
+          <label class="filter"><span class="sr-only">Filter by status</span><select id="job-filter"><option value="">All statuses</option><option value="queued">Queued</option><option value="running">Running</option><option value="succeeded">Succeeded</option><option value="dead_letter">Dead letter</option></select></label>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Job ID</th><th scope="col">Tenant</th><th scope="col">Handler</th><th scope="col">Status</th><th scope="col">Priority</th><th scope="col">Attempts</th><th scope="col">Updated</th></tr></thead>
+            <tbody id="job-rows"><tr><td class="empty" colspan="7">Loading jobs…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+      <footer><span>FairSlot <span class="footer-separator">/</span> v0.1</span><span id="last-updated"></span></footer>
+    </section>
+
+    <section id="lab" aria-labelledby="lab-heading" hidden>
+      <div class="page-head">
+        <div><p class="eyebrow">Scheduler comparison</p><h1 id="lab-heading">Fairness Lab<span>.</span></h1>
+        <p class="lede">See how a bulk submission changes queue wait for smaller tenants.</p></div>
+      </div>
+      <div class="lab-controls panel">
+        <div><h2>Noisy neighbor</h2><p>Northstar submits first. Lumen, Terrace, and Orbit add 1,000 jobs in total.</p></div>
+        <form id="lab-form">
+          <label>Northstar jobs <input id="bulk" type="number" min="100" max="200000" value="100000" required></label>
+          <label>Worker slots <input id="slots" type="number" min="1" max="64" value="4" required></label>
+          <button class="button primary" id="simulate" type="submit">Run comparison</button>
+        </form>
+      </div>
+      <p class="lab-method">Simulated queue wait. All jobs arrive before dispatch, run for 250 ms, and use the same worker pool. FairSlot uses equal weights. Both policies run with tenant caps disabled.</p>
+      <div id="lab-results" hidden>
+        <section class="panel dispatch-panel">
+          <div class="panel-head"><div><h2>First 24 dispatches</h2><p id="dispatch-note"></p></div></div>
+          <div class="dispatch-body">
+            <div class="dispatch-row"><span>Global FIFO</span><div id="fifo-track" class="track"></div></div>
+            <div class="dispatch-row"><span>FairSlot</span><div id="fair-track" class="track"></div></div>
+            <ul class="legend" id="legend"></ul>
+          </div>
+        </section>
+        <section class="panel lab-results">
+          <div class="panel-head"><div><h2>Queue wait by tenant</h2><p>Measured from arrival to the start of processing.</p></div></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th scope="col">Tenant</th><th scope="col">Jobs</th><th scope="col">FIFO first</th><th scope="col">FairSlot first</th><th scope="col">FIFO p95</th><th scope="col">FairSlot p95</th></tr></thead>
+              <tbody id="lab-rows"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+      <p id="lab-status" class="inline-status" role="status"></p>
+    </section>
+  </main>
+
+  <dialog id="job-detail" aria-labelledby="detail-heading">
+    <div class="dialog-head">
+      <div><p class="eyebrow">Job inspection</p><h2 id="detail-heading">Job details</h2></div>
+      <form method="dialog"><button class="button secondary" type="submit" aria-label="Close job details">Close</button></form>
+    </div>
+    <div id="detail-content" class="detail-content"></div>
+  </dialog>
+  <div class="toast" id="toast" hidden role="status"></div>
+</body>
+</html>
