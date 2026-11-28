@@ -74,8 +74,9 @@ test('a replacement HTTP worker recovers a crashed attempt and its result surviv
   assert.equal((await http('/api/jobs', submission)).id, submitted.id);
   const first = worker('crash-test-1');
   await waitForJob(submitted.id, (job) => job.worker_id === 'crash-test-1');
-  first.child.kill();
-  await first.exit;
+  assert.ok(first.child.kill('SIGKILL'), 'The active worker must be terminated.');
+  const [, signal] = await first.exit;
+  assert.equal(signal, 'SIGKILL');
 
   worker('crash-test-2');
   const finished = await waitForJob(submitted.id, (job) => job.status === 'succeeded');
