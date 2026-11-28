@@ -1,48 +1,12 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { createInterface } from 'node:readline';
 import test from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { postgresFixture } from './postgres-fixture.js';
+import { launchProcess, postgresFixture, startPostgresCoordinator } from './postgres-fixture.js';
 
 test('PostgreSQL coordinators share claims and a worker survives the loss of its coordinator', { timeout: 25_000 }, async (t) => {
   const { url, cleanups } = await postgresFixture(t);
 
-  function launch(file, env, stdout = 'ignore') {
-    const processEnv = { ...process.env, ...env };
-    const child = spawn(process.execPath, [file], { env: processEnv, stdio: ['ignore', stdout, 'inherit'] });
-    const exit = once(child, 'exit');
-    exit.catch(() => {});
-    const stop = async () => {
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-      await exit;
-    };
-    cleanups.push(stop);
-    return { child, exit, stop };
-  }
-
-  async function coordinator() {
-    const running = launch('src/server.js', {
-      FAIRSLOT_DATABASE_URL: url, FAIRSLOT_HOST: '127.0.0.1', FAIRSLOT_PORT: '0',
-      FAIRSLOT_KEY: '', FAIRSLOT_LEASE_MS: '2400', FAIRSLOT_AGING_MS: '30000',
-    }, 'pipe');
-    const lines = createInterface({ input: running.child.stdout });
-    try {
-      const base = await Promise.race([
-        once(lines, 'line', { signal: AbortSignal.timeout(8_000) }).then(([line]) => {
-          const match = /^FairSlot coordinator listening on (http:\/\/127\.0\.0\.1:\d+)$/.exec(line);
-          assert.ok(match, line);
-          return match[1];
-        }),
-        running.exit.then(([code]) => assert.fail(`Coordinator exited before it was ready (code ${code}).`)),
-      ]);
-      return { base, stop: running.stop };
-    } finally {
-      lines.close();
-      running.child.stdout.resume();
-    }
-  }
+  const coordinator = () => startPostgresCoordinator(url, cleanups, { leaseMs: 2_400 });
 
   async function http(base, path, body) {
     const response = await fetch(`${base}${path}`, {
@@ -99,7 +63,9 @@ test('PostgreSQL coordinators share claims and a worker survives the loss of its
   }
 
   const work = await expect(a, '/api/jobs', { tenant_id: 'orbit', kind: 'wait', payload: { duration_ms: 4_200 } }, 201);
-  launch('src/worker.js', { FAIRSLOT_URLS: `${a},${b}`, FAIRSLOT_WORKER_ID: 'failover-worker', FAIRSLOT_SLOTS: '1', FAIRSLOT_KEY: '' });
+  launchProcess('src/worker.js', {
+    FAIRSLOT_URLS: `${a},${b}`, FAIRSLOT_WORKER_ID: 'failover-worker', FAIRSLOT_SLOTS: '1', FAIRSLOT_KEY: '',
+  }, cleanups);
   const running = await waitForJob(b, work.id, 'running');
   assert.equal(running.worker_id, 'failover-worker');
   const dashboard = await expect(b, '/api/dashboard');

@@ -11,6 +11,7 @@
     "worker": "node src/worker.js",
     "demo": "node scripts/demo.js",
     "benchmark": "node scripts/benchmark.js",
+    "benchmark:postgres": "node scripts/postgres-benchmark.js",
     "test": "node --test",
     "test:integration": "node --test scripts/integration.js",
     "test:postgres": "node --test test/engine.test.js scripts/postgres-integration.js"

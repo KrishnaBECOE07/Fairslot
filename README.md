@@ -2,7 +2,7 @@
 
 FairSlot is a multi-tenant background job engine. A tenant with a large backlog can use spare capacity while smaller tenants continue to get worker slots. Every dispatch records the scheduler decision alongside the job's attempts and outcome.
 
-[Project plan and architecture](docs/PROJECT-PLAN.md)
+In a **101,000-job simulation**, FairSlot reduced p95 queue wait for the three smaller tenants from about 105 minutes under FIFO to 47–91 seconds. A separate [live PostgreSQL benchmark](#live-postgresql-benchmark) runs the HTTP coordinator and worker processes and checks the durable claim history. [Project plan and architecture](docs/PROJECT-PLAN.md)
 
 ## Run locally
 
@@ -18,6 +18,8 @@ Open [the operator console](http://127.0.0.1:4317). Select **Run live workload**
 - **Fairness Lab** compares global FIFO against FairSlot using the same input jobs and worker slots. Change the bulk backlog or worker count and rerun the comparison.
 
 The default database is `data/fairslot.db`. Jobs, results, and dispatch history persist across runs. For separate processes, run `npm start` in one terminal and `npm run worker` in each worker terminal.
+
+For a quick walkthrough, open **Fairness Lab** to see how the first dispatches are allocated. Then run the live workload from **Overview** and inspect a dead-lettered job to see its retries and final failure.
 
 ## Run two coordinators with PostgreSQL
 
@@ -77,11 +79,35 @@ npm run benchmark
 npm run benchmark -- 50000 8
 ```
 
-The integration test uses a temporary database and a loopback port. It kills an active worker, verifies that the replacement recovers the job, and reopens the coordinator to check the persisted outcome.
+The integration test uses a temporary database and a loopback port. It kills an active worker, verifies that the replacement recovers the job, and reopens the coordinator to check the persisted outcome. GitHub Actions is configured to run the SQLite and PostgreSQL suites and a small live benchmark on pushes and pull requests to `main`.
 
 To run the same ledger contract against PostgreSQL and test failover between two coordinator processes, set `FAIRSLOT_TEST_DATABASE_URL` to a test database whose role can create schemas, then run `npm run test:postgres`. The tests create and remove their own schemas.
 
 With 101,000 simulated jobs on four worker slots, all tenants start in the first dispatch wave under FairSlot. The smaller tenants' p95 queue waits range from 47.25 to 90.5 seconds, compared with 104.7 to 105.2 minutes under global FIFO. The comparison uses virtual time and fixed-duration jobs. It measures dispatch policy under that workload.
+
+### Live PostgreSQL benchmark
+
+Set `FAIRSLOT_TEST_DATABASE_URL` as above and run:
+
+```sh
+npm ci --include=optional
+npm run benchmark:postgres
+# Override the bulk tenant's backlog. The other tenants still submit 120 jobs total.
+npm run benchmark:postgres -- 60
+```
+
+Each case preloads a fresh schema through the HTTP API, then starts four workers with two slots each. The same 480 jobs run with one coordinator and with two coordinators sharing PostgreSQL. The benchmark checks that every job succeeded on its first attempt, dispatch numbers are unique and contiguous, each tenant stayed within its configured concurrency cap, and the first four claims include all four tenants. Its JSON output reports throughput and per-tenant p50, p95, and p99 dispatch wait.
+
+Dispatch wait starts at the first claim for the preloaded backlog. Drain time ends at the last recorded success. Both use timestamps from PostgreSQL, excluding submission and worker startup. The workload uses the 25 ms wait handler with the default tenant caps. The coordinator failover test separately stops a coordinator while a worker lease is active and verifies completion through its peer.
+
+Two local runs per configuration on an Intel Core i5-12500H with Windows, Node.js 22.20.0, and PostgreSQL 17.4 produced these ranges. The database, coordinators, and workers shared one machine.
+
+| Coordinators | Jobs per run | Drain time | Throughput | Smaller tenants' p95 dispatch wait |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 480 | 6.22–6.48 s | 74.1–77.1 jobs/s | 1.19–2.04 s |
+| 2 | 480 | 6.34–6.98 s | 68.8–75.7 jobs/s | 1.32–2.07 s |
+
+All four tenants appeared in the first four claims in every run. At fixed worker capacity, the measured throughput ranges overlap. Both coordinators still share one scheduler lock, so these runs provide a local baseline for comparing coordination overhead.
 
 ## Configuration
 

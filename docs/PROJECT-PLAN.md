@@ -21,6 +21,8 @@ flowchart LR
 
 Workers run independently over HTTP and pull only when they have a free slot. SQLite uses the local coordinator clock. With PostgreSQL, coordinator replicas share the job ledger and use database time for lease decisions. A transaction locks the scheduler state row before changing jobs or leases, so concurrent replicas apply the same dispatch order and per-tenant caps. Workers can register capacity and use either replica to claim, renew, and finish leases.
 
+The shared scheduler lock gives the replicas one dispatch order and serializes ledger mutations. Additional coordinators provide an available endpoint if one process fails. The live PostgreSQL benchmark holds worker capacity constant to measure the cost of coordinating through multiple processes. [Benchmark setup and results](../README.md#live-postgresql-benchmark)
+
 ## Dispatch policy
 
 1. A tenant is eligible when it has a runnable job and an available concurrent lease slot. Delayed jobs stay outside the runnable set until their scheduled time.

@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  sqlite:
+    name: SQLite and worker recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.20.0
+          package-manager-cache: false
+      - run: npm ci --omit=optional
+      - run: npm test
+      - run: npm run test:integration
+
+  postgres:
+    name: PostgreSQL, failover, and live benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: fairslot_test
+          POSTGRES_USER: fairslot
+          POSTGRES_PASSWORD: fairslot_ci
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U fairslot -d fairslot_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.20.0
+          package-manager-cache: false
+      - run: npm ci --include=optional
+      - name: Verify failover and run the benchmark smoke workload
+        env:
+          FAIRSLOT_TEST_DATABASE_URL: postgresql://fairslot:fairslot_ci@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/fairslot_test
+        run: |
+          npm run test:postgres
+          npm run benchmark:postgres -- 60
